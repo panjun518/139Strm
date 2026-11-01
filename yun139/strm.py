@@ -1,0 +1,236 @@
+# -*- coding: utf-8 -*-
+"""STRM 文件生成器：递归遍历移动云盘目录，为每个媒体文件生成 .strm。"""
+
+import os
+import re
+from datetime import datetime
+from urllib.parse import quote
+
+from .client import Yun139Error
+
+# 常见的媒体后缀
+DEFAULT_MEDIA_EXT = [
+    "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v",
+    "ts", "rmvb", "rm", "mpg", "mpeg", "3gp", "iso",
+]
+
+# 常见字幕/附属文件后缀（可选择直接下载到本地）
+DEFAULT_COPY_EXT = ["srt", "ass", "ssa", "sub", "vtt", "nfo", "jpg", "png"]
+
+ILLEGAL_CHARS = r'[\\/:*?"<>|]'
+
+
+def sanitize_name(name: str) -> str:
+    """清理非法文件名字符，兼容 Windows/Emby。"""
+    return re.sub(ILLEGAL_CHARS, "_", name).strip().rstrip(".")
+
+
+class CancelError(Exception):
+    """生成任务被手动终止时抛出，用于及时中断递归扫描。"""
+    pass
+
+
+class StrmGenerator:
+    def __init__(self, client, base_url, output_dir,
+                 media_ext=None, copy_ext=None, min_size_mb=0,
+                 strip_cas=True, include_cas=True,
+                 force=False, delete_orphans=False):
+        self.client = client
+        self.base_url = base_url.rstrip("/")
+        self.output_dir = output_dir
+        self.media_ext = [e.lower().lstrip(".") for e in (media_ext or DEFAULT_MEDIA_EXT)]
+        self.copy_ext = [e.lower().lstrip(".") for e in (copy_ext or DEFAULT_COPY_EXT)]
+        self.min_size = int(min_size_mb * 1024 * 1024)
+        # 去掉 .cas 尾巴，让 Emby 看到的是 xxx.mp4 而不是 xxx.mp4.cas
+        self.strip_cas = strip_cas
+        # 是否把 .cas 秒传文件也生成 strm（靠 302 时秒传还原来播放）
+        self.include_cas = include_cas
+        # 强同步：True 时覆盖已存在的 strm / 附属文件；False 时（增量）跳过已存在
+        self.force = force
+        # 删除孤儿：扫描结束后，删除本次同步范围内、源头已不存在的 .strm
+        # （仅清理 .strm，绝不删字幕/图片等附属文件，避免误删用户手动放置的文件）
+        self.delete_orphans = delete_orphans
+        # 终止标志：被 cancel() 置 True 后，下一个检查点抛出 CancelError
+        self.cancelled = False
+
+        self.created = 0
+        self.updated = 0
+        self.skipped = 0
+        self.copied = 0
+        self.deleted = 0
+        self.cas_count = 0
+        self.errors = []
+        self.log_lines = []
+        # 本次扫描实际产出/保留的 strm 绝对路径（用于删除孤儿时比对）
+        self._produced = set()
+        # 本次递归触及的输出目录（删除孤儿时只在这些目录内清理，避免误删其他来源）
+        self._touched_dirs = set()
+        # 本任务的输出根目录（output_dir/<任务名>），孤儿清理只在这个范围内递归
+        self._job_root = None
+
+    def log(self, msg):
+        line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
+        self.log_lines.append(line)
+        return line
+
+    def is_media(self, name):
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if ext == "cas" and self.include_cas:
+            return True
+        return ext in self.media_ext
+
+    def is_copyable(self, name):
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        return ext in self.copy_ext
+
+    def cancel(self):
+        """请求终止当前生成。会在下一个检查点抛出 CancelError 中断递归。"""
+        self.cancelled = True
+
+    def generate(self, folder_id="/", target_subdir=""):
+        """从指定目录开始递归生成。target_subdir 非空时，strm 落在
+        output_dir/<target_subdir>/ 下（用作任务的"壳目录"）；空时直接落在 output_dir 下。"""
+        if self.cancelled:
+            raise CancelError("生成已被手动终止")
+        try:
+            items = self.client.list_files(folder_id)
+        except Yun139Error as exc:
+            self.errors.append(f"列出目录失败 {target_subdir or '/'}: {exc}")
+            self.log(f"列出目录失败: {exc}")
+            return
+
+        target_dir = os.path.join(self.output_dir, target_subdir) if target_subdir else self.output_dir
+        os.makedirs(target_dir, exist_ok=True)
+        # 顶层调用时记下本任务的输出根目录，孤儿清理只在这个范围内递归
+        if self._job_root is None:
+            self._job_root = os.path.abspath(target_dir)
+        self._touched_dirs.add(os.path.abspath(target_dir))
+
+        for item in items:
+            if self.cancelled:
+                raise CancelError("生成已被手动终止")
+            if item.is_folder:
+                sub = sanitize_name(item.name)
+                self.generate(item.file_id, os.path.join(target_subdir, sub) if target_subdir else sub)
+                continue
+
+            if self.is_media(item.name):
+                self._make_strm(item, target_dir)
+            elif self.is_copyable(item.name):
+                self._copy_file(item, target_dir)
+            else:
+                self.skipped += 1
+
+    def _make_strm(self, item, target_dir):
+        raw_name = item.name
+        is_cas = raw_name.lower().endswith(".cas")
+        name = raw_name[:-4] if (self.strip_cas and is_cas) else raw_name
+        safe = sanitize_name(name)
+        strm_path = os.path.join(target_dir, safe + ".strm")
+
+        # 小于最小体积阈值：不生成。但本地若已有同名 strm，必须记为"已产出"保留下来，
+        # 否则孤儿清理会把它当成"云端源文件已删除"给误删掉。
+        if 0 < self.min_size and item.size < self.min_size:
+            self.skipped += 1
+            if os.path.exists(strm_path):
+                self._produced.add(os.path.abspath(strm_path))
+            return
+
+        exists = os.path.exists(strm_path)
+        # 增量模式（默认）：同名 strm 已存在就跳过（源头仍在，记录为已产出）
+        if exists and not self.force:
+            self.skipped += 1
+            self._produced.add(os.path.abspath(strm_path))
+            return
+
+        # 关键：strm 内容指向我们自己的 /d/<file_id>，
+        # 播放时由服务端 302 到移动云盘直链，本机不中转流量
+        url = f"{self.base_url}/d/{item.file_id}"
+        if is_cas:
+            # 带上原始文件名，302 时才知道要做秒传还原
+            url += "?cas=" + quote(raw_name, safe="")
+        try:
+            with open(strm_path, "w", encoding="utf-8") as fp:
+                fp.write(url)
+            self._produced.add(os.path.abspath(strm_path))
+            if exists:
+                self.updated += 1
+                self.log(f"更新 {safe}.strm" + ("（CAS 秒传）" if is_cas else ""))
+            else:
+                self.created += 1
+                if is_cas:
+                    self.cas_count += 1
+                self.log(f"生成 {safe}.strm" + ("（CAS 秒传）" if is_cas else ""))
+        except OSError as exc:
+            self.errors.append(f"写入失败 {safe}: {exc}")
+
+    def _copy_file(self, item, target_dir):
+        """把字幕等小文件真正下载到本地（体积不大，可接受）。"""
+        safe = sanitize_name(item.name)
+        dest = os.path.join(target_dir, safe)
+        if os.path.exists(dest) and not self.force:
+            return
+        try:
+            url = self.client.get_download_url(item.file_id)
+            import requests
+            resp = requests.get(url, timeout=60)
+            resp.raise_for_status()
+            with open(dest, "wb") as fp:
+                fp.write(resp.content)
+            self.copied += 1
+            self.log(f"下载附属文件 {safe}")
+        except Exception as exc:
+            self.errors.append(f"下载失败 {safe}: {exc}")
+
+    def clean_orphans(self):
+        """扫描结束后，删除本任务输出目录里、云端源文件已不存在的 .strm（仅限 .strm）。
+
+        判断依据：本次扫描中云端仍存在的视频文件，其 strm 都记在 self._produced。
+        本地还在、但不在这个清单里的 .strm，说明云端对应的原视频已经没了
+        （单个文件被删，或者整个子目录被删），于是跟着删掉。
+
+        递归范围是本任务的输出根目录（output_dir/<任务名>），这样云端删掉整个子目录时，
+        本地对应的子目录同样能清干净——只扫"本次触及的目录"做不到这一点。
+        不会动其他任务的目录，也不会删字幕/图片等附属文件。
+        仅当 delete_orphans=True 时调用。
+        """
+        if not self.delete_orphans:
+            return
+        root = self._job_root
+        # 兜底：没有壳目录时（任务直接输出到 output_dir 根、多个任务共用同一目录），
+        # 退回只清理本次触及的目录，避免把其他任务/来源的 strm 一起删掉
+        if not root or os.path.abspath(root) == os.path.abspath(self.output_dir):
+            dirs = sorted(self._touched_dirs)
+        else:
+            dirs = [d for d, _sub, _files in os.walk(root)] or [root]
+        for d in dirs:
+            try:
+                entries = os.listdir(d)
+            except OSError as exc:
+                self.errors.append(f"清理孤儿时无法读取目录 {d}: {exc}")
+                continue
+            for fn in entries:
+                if not fn.lower().endswith(".strm"):
+                    continue
+                full = os.path.abspath(os.path.join(d, fn))
+                if full in self._produced:
+                    continue
+                try:
+                    os.remove(full)
+                    self.deleted += 1
+                    self.log(f"删除孤儿 {fn}（云端源文件已不存在）")
+                except OSError as exc:
+                    self.errors.append(f"删除失败 {fn}: {exc}")
+
+    def summary(self):
+        return {
+            "cancelled": self.cancelled,
+            "created": self.created,
+            "updated": self.updated,
+            "deleted": self.deleted,
+            "cas": self.cas_count,
+            "skipped": self.skipped,
+            "copied": self.copied,
+            "errors": self.errors,
+            "logs": self.log_lines[-200:],
+        }
