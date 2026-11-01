@@ -74,7 +74,7 @@ jobs:
           import os
 
           tag = os.environ.get("TAG", "v1.0")
-          user = os.environ.get("DH_USER", "panjun518")
+          user = os.environ.get("DH_USER", "tianjian518")
           report = open("report.md").read()
 
           notes = f"""## 139Strm {tag}
