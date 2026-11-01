@@ -107,7 +107,7 @@ mkdir -p 139strm/{config,strm} && cd 139strm
 cat > docker-compose.yml <<'EOF'
 services:
   139strm:
-    image: panjun518/139strm:1.0
+    image: tianjian518/139strm:1.0
     container_name: 139strm
     restart: unless-stopped
     ports:
