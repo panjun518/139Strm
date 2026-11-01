@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-scale, initial-scale=1">
+<title>139Strm · 移动云盘 STRM 工具</title>
+<style>
+:root{
+  --bg:#f3f4f6; --card:#fff; --ink:#1f2937; --sub:#6b7280; --line:#e5e7eb;
+  --brand:#2563eb; --brand-2:#1d4ed8; --soft:#eff6ff; --soft-line:#bfdbfe;
+  --ok:#16a34a; --warn:#d97706; --bad:#dc2626;
+  --run:#3b82f6; --edit:#1f2937; --log:#0ea5e9; --del:#ef4444;
+  --hover:#f9fafb;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+a{color:var(--brand);text-decoration:none}
+button{font:inherit;cursor:pointer}
+
+/* 整体布局 */
+.layout{display:grid;grid-template-columns:220px 1fr;min-height:100vh}
+@media (max-width:720px){.layout{grid-template-columns:1fr}.sidebar{position:sticky;top:0;z-index:5}}
+
+/* 侧栏 */
+.sidebar{background:#fff;border-right:1px solid var(--line);padding:18px 0;display:flex;flex-direction:column}
+.brand{padding:4px 20px 18px;display:flex;align-items:center;gap:10px}
+.brand-logo{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#2563eb,#1e40af);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px}
+.brand-name{font-size:16px;font-weight:700;letter-spacing:.2px}
+.nav{padding:6px 10px;flex:1}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;color:#374151;cursor:pointer;font-size:14px;margin-bottom:2px}
+.nav-item:hover{background:var(--hover)}
+.nav-item.active{background:var(--soft);color:var(--brand-2);font-weight:600}
+.nav-item .icon{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;color:#6b7280}
+.nav-item.active .icon{color:var(--brand-2)}
+.sidebar-foot{padding:14px 16px;border-top:1px solid var(--line);font-size:12px;color:var(--sub)}
+.exit-btn{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:10px;padding:9px 12px;width:calc(100% - 24px);margin-left:12px;margin-right:12px;border:1px solid var(--line);background:#fff;border-radius:8px;color:var(--bad);font-weight:600}
+.exit-btn:hover{background:#fef2f2}
+
+/* 主区 */
+.main{padding:22px 26px 60px;max-width:1100px;width:100%}
+.page{display:none}
+.page.active{display:block}
+.page-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.page-title{font-size:20px;font-weight:700}
+.page-sub{font-size:12.5px;color:var(--sub);margin-top:2px}
+
+/* 通用按钮 */
+.btn{display:inline-flex;align-items:center;gap:6px;background:var(--brand);color:#fff;border:0;border-radius:8px;padding:8px 14px;font-size:13.5px;font-weight:600}
+.btn:hover{background:var(--brand-2)}
+.btn:disabled{background:#9ca3af;cursor:not-allowed}
+.btn.sec{background:#fff;color:#374151;border:1px solid var(--line)}
+.btn.sec:hover{background:var(--hover)}
+.btn.ok{background:var(--ok)}.btn.ok:hover{filter:brightness(0.95)}
+.btn.warn{background:var(--warn)}
+.btn.danger{background:var(--bad)}
+.btn.run{background:var(--run)}
+.btn.icon{padding:6px 9px;font-size:13px;line-height:1}
+.btn.icon svg{width:14px;height:14px;display:block}
+
+/* 卡片 */
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+.card-title{font-size:15px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.card-title .badge{font-size:12px;background:var(--soft);color:var(--brand-2);padding:2px 8px;border-radius:20px;font-weight:600}
+.card-title .sub{font-size:12.5px;color:var(--sub);font-weight:400;margin-left:auto}
+
+/* 表单 */
+label{display:block;font-size:13px;font-weight:600;margin:10px 0 4px;color:#374151}
+.hint{font-size:12.5px;color:var(--sub);margin-bottom:4px;line-height:1.5}
+input[type=text],input[type=number],input[type=password],select,textarea{
+  width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;font-family:inherit;background:#fff
+}
+input:focus,select:focus,textarea:focus{outline:0;border-color:var(--brand);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+textarea{min-height:90px;resize:vertical;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55}
+.row{display:flex;gap:12px;flex-wrap:wrap}
+.row > *{flex:1;min-width:160px}
+.checkbox{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13.5px;color:#374151;cursor:pointer}
+.checkbox input{width:auto}
+
+/* 任务表 */
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:6px}
+.tbl th,.tbl td{border-bottom:1px solid var(--line);padding:11px 10px;text-align:left;vertical-align:middle}
+.tbl th{background:#f8fafc;font-weight:600;color:#475569;font-size:12.5px;letter-spacing:.2px}
+.tbl tr:hover td{background:var(--hover)}
+.tbl .ops{display:flex;gap:6px;justify-content:flex-end}
+.tbl .ops .btn.icon{background:#fff;color:#374151;border:1px solid var(--line)}
+.tbl .ops .btn.icon:hover{background:var(--soft);color:var(--brand-2);border-color:var(--soft-line)}
+.tbl .ops .btn.icon.del{color:var(--bad)}
+.tbl .ops .btn.icon.del:hover{background:#fef2f2;border-color:#fecaca}
+.tbl .empty{padding:46px 20px;text-align:center;color:var(--sub);font-size:13.5px}
+
+.pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:12px;font-weight:600;line-height:1.5}
+.p-ok{background:#dcfce7;color:#166534}
+.p-off{background:#f3f4f6;color:#6b7280}
+.p-run{background:#dbeafe;color:#1d4ed8}
+.p-bad{background:#fee2e2;color:#991b1b}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:#475569}
+.cr{font-family:ui-monospace,Menlo,Consolas,monospace;background:#f3f4f6;padding:1px 6px;border-radius:5px;font-size:12px;color:#1f2937}
+
+/* 模态 */
+.modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:50}
+.modal-bg.show{display:flex}
+.modal{background:#fff;border-radius:14px;width:560px;max-width:92vw;max-height:88vh;overflow:auto;padding:22px 24px 20px;box-shadow:0 20px 60px rgba(0,0,0,.18)}
+.modal h3{font-size:16px;margin-bottom:14px}
+.modal .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+
+/* 提示 */
+.msg{margin-top:10px;padding:8px 12px;border-radius:8px;font-size:13px;display:none}
+.msg.show{display:block}
+.msg.ok{background:#dcfce7;color:#166534;border:1px solid #bbf7d0}
+.msg.err{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+.msg.info{background:var(--soft);color:var(--brand-2);border:1px solid var(--soft-line)}
+
+/* 日志 */
+pre.log{background:#0f172a;color:#e2e8f0;padding:12px 14px;border-radius:8px;font-size:12px;line-height:1.5;max-height:340px;overflow:auto;margin-top:10px;font-family:ui-monospace,Menlo,Consolas,monospace}
+
+/* 目录浏览 */
+.browse-path{display:flex;align-items:center;gap:6px;background:#f3f4f6;border-radius:8px;padding:8px 10px;margin-bottom:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+.browse-path .crumb{color:var(--brand);cursor:pointer}
+.browse-path .crumb:hover{text-decoration:underline}
+.browse-list{background:#fff;border:1px solid var(--line);border-radius:8px;max-height:380px;overflow:auto}
+.browse-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.browse-row:last-child{border-bottom:0}
+.browse-row:hover{background:var(--soft)}
+.browse-row .ico{color:#94a3b8}
+.browse-row .name{flex:1;font-weight:500}
+.browse-row .meta{color:var(--sub);font-size:12px}
+
+/* 状态条 */
+.statusbar{position:fixed;left:220px;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);padding:8px 22px;font-size:13px;display:flex;align-items:center;gap:12px;z-index:4}
+@media (max-width:720px){.statusbar{left:0}}
+.statusbar .sp{flex:1;color:var(--sub)}
+.statusbar .sp b{color:var(--ink)}
+.statusbar .btn.icon{background:#fff;color:#374151;border:1px solid var(--line)}
+.statusbar .btn.icon:hover{background:var(--hover)}
+
+/* 版本号 */
+.ver{padding:10px 20px 4px;font-size:11.5px;color:var(--sub);font-family:ui-monospace,Menlo,Consolas,monospace}
+
+/* 表单内部分组 */
+.group{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:8px;background:#fafbfc}
+.group .gt{font-size:12.5px;color:var(--sub);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- 侧栏 -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo">1</div>
+      <div class="brand-name">139Strm</div>
+    </div>
+    <nav class="nav" id="nav">
+      <div class="nav-item active" data-page="tasks">📋 任务管理</div>
+      <div class="nav-item" data-page="storage">💾 存储管理</div>
+      <div class="nav-item" data-page="browse">📂 存储浏览</div>
+      <div class="nav-item" data-page="plugins">🧩 插件管理</div>
+      <div class="nav-item" data-page="settings">⚙️ 系统设置</div>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="ver">v1.0 · 移动云盘直连</div>
+      <div class="exit-btn" onclick="alert('退出现在没有特殊作用，关闭浏览器即可。')">↩ 退出</div>
+    </div>
+  </aside>
+
+  <!-- 主区 -->
+  <main class="main">
+
+    <!-- 任务管理 -->
+    <section class="page active" id="page-tasks">
+      <div class="page-head">
+        <div>
+          <div class="page-title">任务管理</div>
+          <div class="page-sub">一个云盘目录 = 一个任务，每任务独立定时与同步模式</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn run" id="btnRunAll" onclick="runAll()">▶ 运行所有</button>
+          <button class="btn" onclick="openTaskModal()">+ 添加任务</button>
+        </div>
+      </div>
+      <div class="card" style="padding:0">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th style="width:18%">任务名</th>
+              <th style="width:10%">存储</th>
+              <th style="width:26%">路径</th>
+              <th style="width:18%">定时 (crontab)</th>
+              <th style="width:18%">下次运行</th>
+              <th style="width:10%;text-align:right">操作</th>
+            </tr>
+          </thead>
+          <tbody id="taskRows">
+            <tr><td colspan="6" class="empty">还没有任务，点右上「+ 添加任务」建一个</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 存储管理 -->
+    <section class="page" id="page-storage">
+      <div class="page-head">
+        <div>
+          <div class="page-title">存储管理</div>
+          <div class="page-sub">移动云盘（139 / 和彩云）唯一支持的存储</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">💾 移动云盘 <span class="sub" id="authState"></span></div>
+        <label>Authorization（从 yun.139.com 抓包获取）</label>
+        <div class="hint">登录网页版后 F12 → 网络 → 任意请求 → 请求头 Authorization，<b>去掉开头的 Basic 空格</b> 后粘贴</div>
+        <textarea id="auth" placeholder="cGM6MTM4... 只填 Basic 后面那串 Base64"></textarea>
+
+        <div class="row">
+          <div>
+            <label>云类型</label>
+            <select id="cloudType">
+              <option value="personal_new">新版个人云（推荐）</option>
+              <option value="personal">旧版个人云</option>
+              <option value="family">家庭云</option>
+              <option value="group">群组云</option>
+            </select>
+          </div>
+          <div>
+            <label>基础地址（写入 strm 的地址，飞牛推荐 http://127.0.0.1:8025）</label>
+            <input id="baseUrl" type="text" placeholder="http://127.0.0.1:8025">
+          </div>
+        </div>
+
+        <label>139 邮箱 Cookie（可选，免抓包登录用）</label>
+        <div class="hint">留空即可；若使用，需登录 mail.10086.cn 后复制完整 Cookie（含 Os_SSo_Sid 与 RMKEY）</div>
+        <textarea id="cookies" placeholder="可留空"></textarea>
+        <div class="row">
+          <div>
+            <label>手机号（配合 Cookie 登录）</label>
+            <input id="username" placeholder="可留空">
+          </div>
+          <div>
+            <label>群组 ID（仅群组云需要）</label>
+            <input id="cloudId" placeholder="可留空">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button class="btn sec" onclick="loadConfig()">↻ 重新加载</button>
+          <button class="btn" onclick="saveConfig()">保存配置</button>
+          <button class="btn ok" onclick="testConn()">测试连接</button>
+        </div>
+        <div id="cfgMsg" class="msg"></div>
+      </div>
+    </section>
+
+    <!-- 存储浏览 -->
+    <section class="page" id="page-browse">
+      <div class="page-head">
+        <div>
+          <div class="page-title">存储浏览</div>
+          <div class="page-sub">浏览云盘目录，把常用的目录一键建成任务</div>
+        </div>
+        <button class="btn" id="btnNewTaskFromBrowse" style="display:none" onclick="onBrowseAction()">+ 在此目录新建任务</button>
+      </div>
+      <div class="card">
+        <div class="browse-path" id="browsePath"></div>
+        <div class="browse-list" id="browseList">
+          <div class="empty" style="padding:24px">点左侧「存储浏览」开始浏览（需先在存储管理里填好 Authorization）</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 插件管理（占位） -->
+    <section class="page" id="page-plugins">
+      <div class="page-head">
+        <div>
+          <div class="page-title">插件管理</div>
+          <div class="page-sub">v2.1 占位：暂未引入插件系统，后续版本开放</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="hint" style="padding:18px;text-align:center">
+          插件系统正在规划中。139Strm 暂时只做「移动云盘 → STRM」一件事，保持简单。
+        </div>
+      </div>
+    </section>
+
+    <!-- 系统设置 -->
+    <section class="page" id="page-settings">
+      <div class="page-head">
+        <div>
+          <div class="page-title">系统设置</div>
+          <div class="page-sub">STRM 默认参数：任务没填就使用这里的值</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">💾 数据存储 <span class="sub" id="storagePill"></span></div>
+        <div id="storageWarn" style="display:none;padding:10px 12px;border-radius:8px;background:#fef2f2;color:#b91c1c;font-size:13px;line-height:1.7;margin-bottom:10px"></div>
+        <div class="hint">下面这些目录必须挂载到 NAS 上的真实文件夹。没挂载的话，配置、任务、生成的 STRM 都只写在容器内部，容器一删除重建（比如升级版本）就全没了。</div>
+        <div style="margin-top:10px;font-size:13px;line-height:2">
+          <div>配置 &amp; 凭据：<span class="mono" id="stConfigPath">-</span> <span id="stConfigFlag"></span></div>
+          <div>任务列表：<span class="mono" id="stTasksPath">-</span> <span id="stTasksFlag"></span></div>
+          <div>STRM 输出：<span class="mono" id="stOutPath">-</span> <span id="stOutFlag"></span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🩺 播放诊断 <span class="sub">最近 40 次播放请求</span></div>
+        <div class="hint">偶发「一直加载中」时，先看这里：<b>红色=服务端没能给出直链</b>（会写明原因）；绿色的「直链余命」是交出去时这条链还剩多少秒可用。<b>🔁续播</b> 表示这次被识别成「接着上次进度回来」，服务端已按全新播放重来；<b>🆕新播</b> 表示从头播。<b style="color:#b45309">☁ N 个来回</b> 是这次跟云盘打了几次网络往返 —— 服务器在海外时，慢不慢几乎全由这个数字决定。</div>
+        <div id="diagBox" style="margin-top:8px;font-size:12px;line-height:1.9;max-height:240px;overflow:auto">加载中…</div>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <button class="btn sec" onclick="loadDiag()">刷新</button>
+          <button class="btn sec" onclick="copyDiag(event)">复制诊断</button>
+          <button class="btn sec" onclick="runSelftest(event)">网络自检</button>
+          <button class="btn sec" onclick="clearDiag()">清空记录</button>
+        </div>
+        <div id="selftestBox" style="margin-top:8px;font-size:12px;line-height:1.9"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📁 STRM 默认设置</div>
+
+        <div class="row">
+          <div style="flex:2">
+            <label>媒体文件后缀（默认）</label>
+            <div class="hint">逗号分隔，例如 mp4,mkv,avi,ts</div>
+            <input id="optMediaExt" type="text">
+          </div>
+          <div>
+            <label>媒体文件大小阈值 (MB)</label>
+            <div class="hint">小于此值跳过</div>
+            <input id="optMinSize" type="number" min="0" value="0">
+          </div>
+        </div>
+
+        <label>复制到本地的文件后缀（默认）</label>
+        <div class="hint">直接下载到本地的文件，如 srt,ass,jpg,nfo</div>
+        <input id="optCopyExt" type="text">
+
+        <label class="checkbox" style="margin-top:14px">
+          <input id="optUrlEncode" type="checkbox" checked>
+          URL 编码（对 strm 内的 URL 进行编码，兼容中文路径）
+        </label>
+
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button class="btn" onclick="saveConfig()">保存设置</button>
+        </div>
+        <div id="optMsg" class="msg"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📺 CAS 秒传播放 <span class="sub" id="casPill"></span></div>
+        <div class="hint">.cas 是几百字节的特征码文件，靠秒传临时还原出真文件来播放。直链会缓存 2 小时。</div>
+        <div class="row">
+          <div>
+            <label class="checkbox"><input id="casEnabled" type="checkbox" checked> 启用 CAS 秒传播放</label>
+          </div>
+          <div>
+            <label>临时文件保留秒数</label>
+            <input id="casTtl" type="number" min="30" value="300">
+          </div>
+          <div>
+            <label class="checkbox"><input id="casAllowAll" type="checkbox"> 任何后缀都还原（默认只还原视频）</label>
+          </div>
+          <div>
+            <label class="checkbox"><input id="playProxy" type="checkbox"> 代理转发播放（<b>一般不推荐</b>）</label>
+          </div>
+          <div class="hint" style="font-size:12px;opacity:.75;margin-top:4px">
+            <b>默认关闭 = 302 直连</b>：视频从云盘 CDN 直达播放器，<b>不消耗服务器带宽</b>。<br>
+            ⚠️ 开启后视频流全部经过本机中转 —— <b>服务器在云端（甲骨文/腾讯云等）千万别开</b>，
+            会吃掉大量上行流量配额。只有服务器就在家里（局域网播放）才适合开，
+            好处是直链过期可自动换新、长时间播放不中断。
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn sec" onclick="casPurge()">立即清空残留临时文件</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- 状态条 -->
+<div class="statusbar">
+  <span id="stPill" class="pill p-off">空闲</span>
+  <span class="sp" id="stText">就绪</span>
+  <button class="btn icon" id="btnStop" style="display:none" onclick="stopTasks()">⛔ 强制终止</button>
+</div>
+
+<!-- 任务编辑模态 -->
+<div class="modal-bg" id="taskModal">
+  <div class="modal">
+    <h3 id="taskModalTitle">添加任务</h3>
+
+    <label>任务名称 <span class="hint" style="display:inline;font-weight:400">（输出到 <span class="cr">/strm/&lt;任务名&gt;</span>，仅做展示用）</span></label>
+    <input id="f_name" type="text" placeholder="例：movie">
+
+    <label>扫描目录 <span class="hint" style="display:inline;font-weight:400">（在云盘里点「浏览」逐级选，不要手填）</span></label>
+    <div style="display:flex;gap:8px">
+      <input id="f_folder" type="text" placeholder="点右侧「浏览」选择目录" readonly style="background:#f8fafc">
+      <button class="btn sec" onclick="openFolderPicker()">📂 浏览</button>
+    </div>
+    <input id="f_folder_path" type="hidden">
+    <div class="hint" id="f_folder_tip" style="margin:-2px 0 6px">未选择目录</div>
+
+    <div class="row">
+      <div>
+        <label>存储</label>
+        <select id="f_storage" disabled>
+          <option value="139">移动云盘（139）</option>
+        </select>
+      </div>
+      <div>
+        <label>同步模式</label>
+        <select id="f_sync">
+          <option value="incremental">增量（已有跳过）</option>
+          <option value="force">强同步（覆盖重生成）</option>
+        </select>
+      </div>
+    </div>
+
+    <label class="checkbox">
+      <input id="f_delorph" type="checkbox" checked> 同步删除（云端的原视频删了，本地对应的 .strm 跟着删；只删 .strm，不动字幕/图片）
+    </label>
+
+    <div class="group">
+      <div class="gt">可选：覆盖默认参数</div>
+      <div class="row">
+        <div>
+          <label>媒体文件后缀</label>
+          <input id="f_mediaext" type="text" placeholder="留空用默认">
+        </div>
+        <div>
+          <label>复制到本地的后缀</label>
+          <input id="f_copyext" type="text" placeholder="留空用默认">
+        </div>
+        <div>
+          <label>大小阈值 (MB)</label>
+          <input id="f_minsize" type="number" min="0" placeholder="留空用默认">
+        </div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">定时（crontab，5 字段：分 时 日 月 周）</div>
+      <label>crontab 表达式 <span class="hint" style="display:inline;font-weight:400">（留空 = 不自动跑，只能手动点运行）</span></label>
+      <input id="f_cron" type="text" placeholder="例：43 3 * * *（每天 3:43）· */30 * * * *（每 30 分钟）">
+      <div class="hint">常用：<span class="cr">0 3 * * *</span> 每天凌晨3点 · <span class="cr">*/30 * * * *</span> 每30分钟 · <span class="cr">0 */6 * * *</span> 每6小时整点</div>
+    </div>
+
+    <div class="msg" id="taskMsg"></div>
+
+    <div class="foot">
+      <button class="btn sec" onclick="closeTaskModal()">取消</button>
+      <button class="btn danger" id="btnDelete" style="display:none" onclick="deleteCurrentTask()">删除任务</button>
+      <button class="btn" onclick="saveTask()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 日志模态 -->
+<div class="modal-bg" id="logModal">
+  <div class="modal" style="width:680px">
+    <h3>运行日志 <span class="hint" style="font-weight:400;font-size:13px" id="logTaskName"></span></h3>
+    <pre class="log" id="logContent">暂无</pre>
+    <div class="foot">
+      <button class="btn sec" onclick="closeLog()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============ 工具 ============
+function $(id){return document.getElementById(id)}
+function show(el, kind, msg){
+  const m = $(el); m.className='msg show '+(kind||'info'); m.textContent=msg
+  setTimeout(()=>{m.className='msg'}, 6000)
+}
+function fmtDate(s){ if(!s) return '—'; const d=new Date(s); return d.toLocaleString('zh-CN',{hour12:false}) }
+function fmtBytes(n){ if(n==null) return '—'; const u=['B','KB','MB','GB','TB']; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++} return n.toFixed(n<10&&i>0?1:0)+' '+u[i] }
+function esc(s){ return String(s||'').replace(/[<>&"']/g, c=>({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'})[c]) }
+
+// ============ 导航 ============
+document.querySelectorAll('#nav .nav-item').forEach(el=>{
+  el.onclick = ()=> {
+    document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'))
+    document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'))
+    el.classList.add('active')
+    $('page-'+el.dataset.page).classList.add('active')
+    // 从任务弹窗进来选目录、却点了别的导航：放弃选择，把弹窗放回来
+    if (pickingForTask && el.dataset.page!=='browse'){
+      pickingForTask = false
+      $('taskModal').classList.add('show')
+    }
+    if (el.dataset.page==='browse'){ browseStack=[{id:'/',name:'根目录'}]; openBrowse('/') }
+    if (el.dataset.page==='storage') loadConfig()
+    if (el.dataset.page==='settings') { loadConfig(); loadCas() }
+    if (el.dataset.page==='tasks') loadTasks()
+  }
+})
+
+// ============ 任务 ============
+let editingId = null
+let currentFolder = '/'
+
+async function loadTasks(){
+  const r = await fetch('/api/tasks').then(r=>r.json())
+  const tb = $('taskRows')
+  if (!r.tasks || r.tasks.length === 0){
+    tb.innerHTML = '<tr><td colspan="6" class="empty">还没有任务，点右上「+ 添加任务」建一个</td></tr>'
+    return
+  }
+  tb.innerHTML = r.tasks.map(t => `
+    <tr>
+      <td><b>${esc(t.name)}</b>${t.enabled===false?'':'<br><span class="pill p-ok" style="font-size:11px">启用</span>'}</td>
+      <td><span class="mono">移动云盘</span></td>
+      <td class="mono" title="目录 ID：${esc(t.folder)}">${esc(t.folder_path || t.folder)}</td>
+      <td>${t.cron ? `<span class="cr">${esc(t.cron)}</span>` : '<span class="pill p-off">未设置</span>'}</td>
+      <td class="mono">${t.cron ? fmtDate(t.next_run_at) : '—'}</td>
+      <td>
+        <div class="ops">
+          <button class="btn icon" title="运行" onclick="runOne('${t.id}')">▶</button>
+          <button class="btn icon" title="编辑" onclick="openTaskModal('${t.id}')">✎</button>
+          <button class="btn icon" title="日志" onclick="openLog('${t.id}','${esc(t.name)}')">📋</button>
+          <button class="btn icon del" title="删除" onclick="askDelete('${t.id}','${esc(t.name)}')">🗑</button>
+        </div>
+      </td>
+    </tr>
+  `).join('')
+}
+
+function openTaskModal(id){
+  editingId = id || null
+  $('taskModalTitle').textContent = id ? '编辑任务' : '添加任务'
+  $('btnDelete').style.display = id ? '' : 'none'
+  $('taskMsg').className = 'msg'
+  if (id){
+    fetch('/api/tasks').then(r=>r.json()).then(j=>{
+      const t = j.tasks.find(x=>x.id===id); if(!t) return
+      $('f_name').value = t.name
+      $('f_folder').value = t.folder
+      $('f_folder_path').value = t.folder_path || ''
+      $('f_folder_tip').textContent = t.folder_path ? ('已选择：'+t.folder_path) : ('目录 ID：'+t.folder)
+      $('f_sync').value = t.sync_mode || 'incremental'
+      $('f_delorph').checked = !!t.delete_orphans
+      $('f_mediaext').value = (t.media_ext||[]).join(',')
+      $('f_copyext').value = (t.copy_ext||[]).join(',')
+      $('f_minsize').value = t.min_size_mb ?? ''
+      $('f_cron').value = t.cron || ''
+    })
+  } else {
+    ['f_name','f_folder','f_folder_path','f_mediaext','f_copyext','f_cron'].forEach(k=>$(k).value='')
+    $('f_folder_tip').textContent = '未选择目录'
+    $('f_minsize').value = ''
+    $('f_sync').value = 'incremental'
+    $('f_delorph').checked = true
+  }
+  $('taskModal').classList.add('show')
+}
+function closeTaskModal(){ $('taskModal').classList.remove('show'); editingId=null }
+
+async function saveTask(){
+  const body = {
+    name: $('f_name').value.trim(),
+    folder: $('f_folder').value.trim() || '/',
+    folder_path: $('f_folder_path').value.trim(),
+    sync_mode: $('f_sync').value,
+    delete_orphans: $('f_delorph').checked,
+    media_ext: $('f_mediaext').value.trim() || null,
+    copy_ext: $('f_copyext').value.trim() || null,
+    min_size_mb: $('f_minsize').value,
+    cron: $('f_cron').value.trim(),
+  }
+  if (!body.name){ show('taskMsg','err','任务名不能为空'); return }
+  if (!body.folder || body.folder === '/'){ show('taskMsg','err','请点「浏览」选择要扫描的目录'); return }
+  const url = editingId ? `/api/tasks/${editingId}` : '/api/tasks'
+  const method = editingId ? 'PUT' : 'POST'
+  const r = await fetch(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json())
+  if (!r.ok){ show('taskMsg','err', r.error || '保存失败'); return }
+  closeTaskModal()
+  loadTasks()
+}
+
+async function askDelete(id, name){
+  if (!confirm(`删除任务「${name}」？\n\n（可勾选同时清理它生成的 strm 目录）`)) return
+  let clean = false
+  if (confirm(`要不要同时删除「${name}」生成的 strm 目录？\n（点确定=删；点取消=保留）`)) clean = true
+  const r = await fetch(`/api/tasks/${id}`,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({clean_output: clean})}).then(r=>r.json())
+  if (!r.ok){ alert('删除失败：'+(r.error||'')); return }
+  loadTasks()
+}
+async function deleteCurrentTask(){
+  if (!editingId) return
+  const name = $('f_name').value
+  if (!confirm(`确认删除任务「${name}」？`)) return
+  const r = await fetch(`/api/tasks/${editingId}`,{method:'DELETE'}).then(r=>r.json())
+  if (!r.ok){ alert('删除失败：'+(r.error||'')); return }
+  closeTaskModal(); loadTasks()
+}
+
+async function runOne(id){
+  const r = await fetch(`/api/tasks/${id}/run`,{method:'POST'}).then(r=>r.json())
+  if (!r.ok) alert('启动失败：'+r.error)
+  pollStatus(true)
+}
+async function runAll(){
+  const r = await fetch('/api/tasks/run',{method:'POST'}).then(r=>r.json())
+  if (!r.ok) alert('启动失败：'+r.error)
+  pollStatus(true)
+}
+async function stopTasks(){
+  const r = await fetch('/api/tasks/stop',{method:'POST'}).then(r=>r.json())
+  pollStatus(true)
+}
+
+async function openLog(id, name){
+  $('logTaskName').textContent = '· '+name
+  $('logContent').textContent = '加载中…'
+  $('logModal').classList.add('show')
+  const j = await fetch('/api/tasks').then(r=>r.json())
+  const t = j.tasks.find(x=>x.id===id)
+  const s = t && t.last_summary
+  if (!s){ $('logContent').textContent='该任务还没运行过' ; return }
+  const lines = []
+  lines.push(`最近一次运行：${fmtDate(t.last_run_at)}`)
+  lines.push(`生成：${s.created||0}  更新：${s.updated||0}  跳过：${s.skipped||0}  复制：${s.copied||0}  删除：${s.deleted||0}  CAS：${s.cas||0}`)
+  if (s.cancelled) lines.push('⚠ 已手动终止')
+  if (s.errors && s.errors.length) lines.push('错误：\n' + s.errors.join('\n'))
+  if (s.logs && s.logs.length) lines.push('\n日志：\n' + s.logs.join('\n'))
+  $('logContent').textContent = lines.join('\n')
+}
+function closeLog(){ $('logModal').classList.remove('show') }
+
+// ============ 状态轮询 ============
+let pollTimer = null
+async function pollStatus(immediate){
+  const j = await fetch('/api/strm/status').then(r=>r.json())
+  const pill = $('stPill'); const txt = $('stText'); const stop = $('btnStop')
+  if (j.running){
+    pill.className = 'pill p-run'
+    pill.textContent = '运行中'
+    const cur = j.current ? `· ${j.current}` : ''
+    txt.innerHTML = `<b>${esc(j.progress||'')}</b> ${esc(cur)} （${j.queue_done||0}/${j.queue_total||0}）`
+    stop.style.display = ''
+  } else {
+    pill.className = 'pill ' + ((j.queue_total>0 && j.queue_done>=j.queue_total) ? 'p-ok' : 'p-off')
+    pill.textContent = '空闲'
+    txt.textContent = j.progress || '就绪'
+    stop.style.display = 'none'
+    if (immediate && j.results && j.results.length) {
+      const last = j.results[j.results.length-1]
+      if (last && last.summary){
+        const s = last.summary
+        const tail = ` · 末次：${esc(last.name)} 新${s.created||0}/更${s.updated||0}/跳${s.skipped||0}/删${s.deleted||0}${s.cas?`/CAS${s.cas}`:''}${s.cancelled?'/已终止':''}${s.errors&&s.errors.length?'/有错误':''}`
+        txt.textContent += tail
+      }
+    }
+  }
+  if (!pollTimer) pollTimer = setInterval(()=>pollStatus(false), 2000)
+}
+
+// ============ 存储配置 ============
+async function loadConfig(){
+  const j = await fetch('/api/config').then(r=>r.json())
+  $('auth').value = ''
+  $('authState').textContent = j.configured ? `· 当前已配置凭据（${j.authorization_masked}）` : '· 尚未配置'
+  $('cloudType').value = j.cloud_type || 'personal_new'
+  $('baseUrl').value = j.base_url || ''
+  $('cookies').value = j.mail_cookies || ''
+  $('username').value = j.username || ''
+  $('cloudId').value = j.cloud_id || ''
+  $('optMediaExt').value = (j.media_ext||[]).join(',')
+  $('optCopyExt').value = (j.copy_ext||[]).join(',')
+  $('optMinSize').value = j.min_size_mb || 0
+  $('optUrlEncode').checked = !!j.url_encode
+  $('casEnabled').checked = !!j.cas_enabled
+  $('casTtl').value = j.cas_temp_ttl || 300
+  $('casAllowAll').checked = !!j.cas_allow_all_ext
+  // 默认开启：老配置里没有这个键时也按开启处理
+  $('playProxy').checked = !!j.play_proxy
+  loadStorage()
+  loadDiag()
+}
+async function loadDiag(){
+  const box = $('diagBox'); if(!box) return
+  let j
+  try { j = await fetch('/api/diag').then(r=>r.json()) } catch(e){ box.textContent='读取失败'; return }
+  if (!j.ok || !j.items || !j.items.length){ box.innerHTML='<div style="opacity:.6">暂无播放记录</div>'; return }
+  box.innerHTML = j.items.map(it=>{
+    const color = it.ok ? '#16a34a' : '#dc2626'
+    // 续播标记：一眼看出这次请求服务端有没有按「全新播放」重来。
+    // 续播（播放器带着非零起点回来、且这部片子已经有一阵子没被访问）
+    // 是唯一会「一直加载中」的那条路，必须能一眼认出来。
+    const tag = it.resume
+      ? `<b style="color:#2563eb">🔁续播</b>${
+           it.rwhy === 'trace'
+             ? '<span style="opacity:.6;font-size:11px">(无记录但有痕)</span>'
+             : ''
+         } `
+      : '<span style="opacity:.55">🆕新播</span> '
+    const info = it.ok
+      ? `耗时 ${it.ms}ms · 直链余命 ${it.life}s${it.cas?' · CAS秒传':''}`
+      : `❌ ${(it.err||'未知原因').replace(/</g,'&lt;')}`
+    // 跟云盘打了几个来回 —— 服务器在海外时，慢不慢几乎全由这个数字决定
+    const calls = (typeof it.calls === 'number' && it.calls > 0)
+      ? `<span style="color:#b45309">☁ ${it.calls} 个来回 / ${it.call_ms}ms</span>` : ''
+    // 播放器发过来的原始 Range：卡住时这是最关键的一条证据
+    const rng = it.rng
+      ? `<span style="color:#7c3aed">Range: ${String(it.rng).replace(/</g,'&lt;')}</span>`
+      : '<span style="opacity:.5">无 Range</span>'
+    const gap = (typeof it.gap === 'number' && it.gap > 0)
+      ? `<span style="opacity:.6">距上次 ${it.gap}s</span>` : ''
+    // 「换文件」：这次把临时文件换成了新的（旧的会被清掉）。
+    // 播放中频繁出现这个标记，就会让画面「跳回起播点」。
+    const nf = it.newfile === true
+      ? '<b style="color:#dc2626">🔄换了新文件</b> '
+      : (it.newfile === false ? '<span style="opacity:.5">复用文件</span> ' : '')
+    // 播放器要的位置 vs 文件实际大小。越界 = 「跳回起播点」的头号嫌疑：
+    // 播放器以为后面还有内容，其实文件已经到底了。
+    const sz = (typeof it.size === 'number' && it.size > 0)
+      ? `<span style="opacity:.6">文件 ${(it.size/1073741824).toFixed(2)}GB</span> ` : ''
+    const ov = it.oversize
+      ? `<b style="color:#dc2626">⚠️ 要的位置超出文件末尾（要 ${(it.want/1073741824).toFixed(2)}GB / 文件只有 ${(it.size/1073741824).toFixed(2)}GB）</b> `
+      : ''
+    return `<div style="padding:4px 0;border-bottom:1px solid rgba(128,128,128,.15)">
+      <span style="color:${color}">●</span> ${it.t}
+      · ${tag}
+      <b>${(it.name||'').replace(/</g,'&lt;').slice(0,24)}</b>
+      <span style="opacity:.75">${info}</span>
+      <div style="padding-left:14px;font-size:11px">${rng} ${gap} ${calls} ${nf}${sz}${ov}
+        <span style="opacity:.45">${(it.ua||'').replace(/</g,'&lt;')}</span></div></div>`
+  }).join('')
+}
+async function copyDiag(ev){
+  const btn = ev && ev.target
+  let j
+  try { j = await fetch('/api/diag').then(r=>r.json()) } catch(e){ return }
+  if (!j.items || !j.items.length){ alert('暂无播放记录'); return }
+  const lines = j.items.map(it => {
+    const parts = [it.t, it.resume ? '续播' : '新播', (it.name||'').slice(0,30)]
+    parts.push(it.ok ? `成功 耗时${it.ms}ms 余命${it.life}s` : `失败 ${it.err||''}`)
+    parts.push(`Range=${it.rng||'(无)'}`)
+    if (it.gap) parts.push(`距上次${it.gap}s`)
+    if (it.calls) parts.push(`来回${it.calls}个/${it.call_ms}ms`)
+    if (it.newfile === true) parts.push('换了新文件')
+    else if (it.newfile === false) parts.push('复用文件')
+    if (it.size) parts.push(`文件${(it.size/1073741824).toFixed(2)}GB`)
+    if (it.oversize) parts.push(`越界(要${(it.want/1073741824).toFixed(2)}GB/文件${(it.size/1073741824).toFixed(2)}GB)`)
+    if (it.ua) parts.push(it.ua)
+    return parts.join(' | ')
+  })
+  const text = '【139Strm 播放诊断】\n' + lines.join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    if (btn) { btn.textContent='已复制 ✓'; setTimeout(()=>btn.textContent='复制诊断', 1500) }
+  } catch(e) {
+    // 剪贴板不可用时退化为弹窗，手动长按复制
+    prompt('长按复制以下内容：', text)
+  }
+}
+async function clearDiag(){
+  await fetch('/api/diag/clear',{method:'POST'}); loadDiag()
+}
+async function runSelftest(ev){
+  const box = $('selftestBox'); if(!box) return
+  const btn = ev && ev.target
+  if (btn) btn.textContent = '检测中…'
+  box.innerHTML = '正在检测…'
+  let j
+  try { j = await fetch('/api/selftest').then(r=>r.json()) } catch(e){
+    box.textContent = '自检失败'; if (btn) btn.textContent='网络自检'; return
+  }
+  if (btn) btn.textContent = '网络自检'
+  const p = j.probe || {}
+  const c = j.cdn || {}
+  const okColor = v => v ? '#16a34a' : '#dc2626'
+  box.innerHTML = `
+    <div>服务器出口 IP：<b>${j.egress_ip || '取不到'}</b></div>
+    ${c.host ? `<div>云盘 CDN：<span class="mono">${c.host}</span></div>` : ''}
+    ${c.tcp_ms != null ? `<div>到 CDN 的 TCP 连接：<b>${c.tcp_ms} 毫秒</b></div>` : ''}
+    ${c.tcp_error ? `<div style="color:#dc2626">连不上 CDN：${c.tcp_error}</div>` : ''}
+    ${c.probe_verdict ? `<div>探测结论：<b style="color:${c.probe_verdict==='alive'?'#16a34a':'#dc2626'}">${c.probe_verdict}</b>（耗时 ${c.probe_ms} 毫秒，链余命 ${c.life_s} 秒）</div>` : ''}
+    ${(p.recent_ms&&p.recent_ms.length) ? `<div>最近几次探测耗时：<span class="mono">${p.recent_ms.join(' / ')} 毫秒</span>${p.slow_pause_left?` <b style="color:#dc2626">（太慢，已暂停探测 ${p.slow_pause_left} 秒）</b>`:''}</div>` : ''}
+    <div>探测功能：<b style="color:${okColor(p.usable)}">${p.usable?'可用':'已暂停（'+Math.max(p.breaker_left,p.slow_pause_left||0)+' 秒后恢复）'}</b></div>
+    ${(j.cas_cache&&!j.cas_cache.error) ? `<div>.cas 解析缓存：<span class="mono">${j.cas_cache.path}</span> ${j.cas_cache.writable?'<b style="color:#16a34a">可写</b>':'<b style="color:#dc2626">不可写</b>'} · 已存 ${j.cas_cache.entries} 条 ${j.cas_cache.exists?'':'<b style="color:#dc2626">（文件不存在，重启后会重新读云盘）</b>'}</div>` : ''}
+    <div style="margin-top:6px;padding:6px 8px;border-radius:6px;background:rgba(128,128,128,.12)">${j.note||''}</div>`
+}
+async function loadStorage(){
+  let j
+  try { j = await fetch('/api/storage').then(r=>r.json()) } catch(e){ return }
+  if (!j.ok) return
+  const flag = v => v===true ? '<span style="color:#16a34a">✅ 已挂载</span>'
+                  : v===false ? '<span style="color:#dc2626">❌ 未挂载</span>'
+                  : '<span style="color:#94a3b8">未知</span>'
+  $('stConfigPath').textContent = j.config_path || '-'
+  $('stTasksPath').textContent  = j.tasks_path || '-'
+  $('stOutPath').textContent    = j.output_dir || '(未设置)'
+  $('stConfigFlag').innerHTML   = flag(j.config_mounted)
+  $('stOutFlag').innerHTML      = flag(j.output_mounted)
+  $('stTasksFlag').innerHTML    = j.tasks_exists
+      ? '<span style="color:#64748b">已保存</span>'
+      : '<span style="color:#94a3b8">尚未创建</span>'
+  const warn = $('storageWarn')
+  if (j.config_mounted === false || j.output_mounted === false){
+    warn.style.display = ''
+    warn.innerHTML = '⚠️ <b>数据没有挂载到 NAS 的文件夹！</b><br>' +
+      '现在配置、任务、生成的 STRM 都只写在容器内部，' +
+      '<b>容器一旦删除重建（比如升级版本）就会全部消失</b>。<br>' +
+      '请在 Docker 部署里把上面两个路径挂到 NAS 的真实文件夹，' +
+      '具体做法见项目 README 的「数据存储与挂载」一节。'
+    $('storagePill').textContent = '⚠️ 未持久化'
+    $('storagePill').style.color = '#dc2626'
+  } else {
+    warn.style.display = 'none'
+    $('storagePill').textContent = j.persisted ? '✅ 已持久化' : '检查中'
+    $('storagePill').style.color = j.persisted ? '#16a34a' : '#94a3b8'
+  }
+}
+async function saveConfig(){
+  const body = {
+    authorization: $('auth').value.trim(),
+    cloud_type: $('cloudType').value,
+    base_url: $('baseUrl').value.trim(),
+    mail_cookies: $('cookies').value,
+    username: $('username').value,
+    cloud_id: $('cloudId').value,
+    media_ext: $('optMediaExt').value,
+    copy_ext: $('optCopyExt').value,
+    min_size_mb: parseFloat($('optMinSize').value||0),
+    url_encode: $('optUrlEncode').checked,
+    cas_enabled: $('casEnabled').checked,
+    cas_temp_ttl: parseInt($('casTtl').value||300),
+    cas_allow_all_ext: $('casAllowAll').checked,
+    play_proxy: $('playProxy').checked,
+  }
+  const r = await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json())
+  show('cfgMsg', r.ok?'ok':'err', r.ok?'已保存':(r.error||'保存失败'))
+  if (r.ok) loadConfig()
+}
+async function testConn(){
+  const body = {
+    authorization: $('auth').value.trim() || undefined,
+    cloud_type: $('cloudType').value,
+  }
+  const r = await fetch('/api/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json())
+  if (r.ok){
+    show('cfgMsg','ok', `✓ 连接成功！账号 ${r.account||'(未识别)'}，根目录 ${r.root_items} 项，CDN ${r.host||''}${r.expire?'，凭据 '+fmtDate(r.expire)+' 到期':''}`)
+  } else {
+    show('cfgMsg','err', '连接失败：'+(r.error||''))
+  }
+}
+
+async function loadCas(){
+  const j = await fetch('/api/cas/status').then(r=>r.json())
+  let txt = j.enabled ? '已启用' : '未启用'
+  if (j.enabled) {
+    const bits = []
+    if (j.temp_bytes != null) bits.push(`临时目录 ${fmtBytes(j.temp_bytes)}`)
+    if (j.active_sessions) bits.push(`播放中 ${j.active_sessions}`)
+    if (j.pending_cleanup) bits.push(`待清理 ${j.pending_cleanup}`)
+    txt += bits.length ? ' · ' + bits.join(' · ') : ''
+  }
+  $('casPill').textContent = txt
+}
+async function casPurge(){
+  if (!confirm('立即清空残留临时文件？')) return
+  const j = await fetch('/api/cas/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(r=>r.json())
+  if (j.ok) { loadCas(); alert('已清理 '+j.deleted+' 个临时文件') } else alert('失败：'+(j.error||''))
+}
+
+// ============ 存储浏览 ============
+// 移动云盘是按「目录 ID」列目录的，没有真正的路径概念。
+// 所以这里自己维护一条面包屑栈 browseStack=[{id,name}...]，
+// 点子目录时把它的 file_id 压栈回传，点面包屑时截断栈跳回去。
+let browseStack = [{id:'/', name:'根目录'}]
+let browseItems = []
+// true = 是从任务弹窗点「浏览」进来的，选完目录要回填并回到弹窗
+let pickingForTask = false
+
+function browseDisplayPath(){
+  return browseStack.map(s=>s.name).join(' / ')
+}
+function renderBrowsePath(){
+  $('browsePath').innerHTML = browseStack.map((s,i)=>
+    i===browseStack.length-1
+      ? `<span>${esc(s.name)}</span>`
+      : `<span class="crumb" onclick="gotoCrumb(${i})">${esc(s.name)}</span>`
+  ).join(' <span style="color:#cbd5e1">/</span> ')
+}
+async function openBrowse(folder){
+  currentFolder = folder
+  $('browseList').innerHTML = '<div class="empty" style="padding:24px">读取中…</div>'
+  let j
+  try {
+    j = await fetch('/api/list?folder='+encodeURIComponent(folder)).then(r=>r.json())
+  } catch(e){
+    $('browseList').innerHTML = `<div class="empty" style="padding:24px">请求失败：${esc(e)}</div>`
+    return
+  }
+  if (!j.ok){
+    $('browseList').innerHTML = `<div class="empty" style="padding:24px">读取失败：${esc(j.error||'未知错误')}</div>`
+    return
+  }
+  browseItems = j.items || []
+  renderBrowsePath()
+  $('btnNewTaskFromBrowse').style.display = folder==='/' ? 'none' : ''
+  $('btnNewTaskFromBrowse').textContent = pickingForTask ? '✅ 选择此目录' : '+ 在此目录新建任务'
+  if (browseItems.length===0){
+    $('browseList').innerHTML = '<div class="empty" style="padding:24px">此目录为空</div>'
+    return
+  }
+  $('browseList').innerHTML = browseItems.map((it,i) => `
+    <div class="browse-row" onclick="${it.is_folder ? `enterDir(${i})` : `pickFile(${i})`}">
+      <span class="ico">${it.is_folder ? '📁' : '🎬'}</span>
+      <span class="name">${esc(it.name)}</span>
+      <span class="meta">${it.is_folder ? '进入' : esc(it.size_human||'')}</span>
+    </div>
+  `).join('')
+}
+function enterDir(i){
+  const it = browseItems[i]
+  if (!it) return
+  browseStack.push({id: it.file_id, name: it.name})
+  openBrowse(it.file_id)
+}
+function gotoCrumb(i){
+  browseStack = browseStack.slice(0, i+1)
+  openBrowse(browseStack[i].id)
+}
+function pickFile(i){
+  alert(pickingForTask
+    ? '任务要建在「目录」上，不能建在单个文件上。\n请回到它的父目录，再点右上角「✅ 选择此目录」。'
+    : '任务要建在「目录」上，不能建在单个文件上。\n请回到它的父目录，再点右上角「+ 在此目录新建任务」。')
+}
+function newTaskFromBrowse(){
+  if (currentFolder==='/'){
+    alert('请先进到一个子目录，再建任务。')
+    return
+  }
+  const name = browseStack[browseStack.length-1].name || 'new'
+  pickingForTask = false   // 从左侧导航进来是新建任务，不走"回填到已有弹窗"那条路
+  openTaskModal()
+  $('f_name').value = name
+  $('f_folder').value = currentFolder
+  $('f_folder_path').value = browseDisplayPath()
+  $('f_folder_tip').textContent = '已选择：' + browseDisplayPath()
+}
+function openFolderPicker(){
+  // 从任务弹窗进来选目录：必须先把弹窗收起来。
+  // 弹窗是 position:fixed + z-index:50 的全屏层，不收起来会盖住浏览页，看着像"点了没反应"
+  pickingForTask = true
+  $('taskModal').classList.remove('show')
+  // 切到浏览页
+  document.querySelectorAll('.page').forEach(x=>{ if(x.id!=='page-browse') x.classList.remove('active') })
+  document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'))
+  $('page-browse').classList.add('active')
+  document.querySelector('[data-page=browse]').classList.add('active')
+  // 起点：新建任务从根目录开始；编辑老任务时从它当前目录开始，方便就近换目录。
+  // 想彻底重选，点面包屑最左边的「根目录」即可回到顶层（不这么处理的话，
+  // currentFolder 是全局的，会从别的任务上次浏览的位置接着走，容易选错目录）
+  const start = ($('f_folder').value && $('f_folder').value !== '/') ? $('f_folder').value : '/'
+  browseStack = (start === '/')
+    ? [{id:'/', name:'根目录'}]
+    : [{id:'/', name:'根目录'}, {id:start, name:'当前目录'}]
+  currentFolder = start
+  openBrowse(start)
+}
+// 浏览页右上角那个按钮：从弹窗进来是「选择此目录」，从左侧导航进来是「新建任务」
+function onBrowseAction(){
+  if (pickingForTask) pickFolderForTask()
+  else newTaskFromBrowse()
+}
+function pickFolderForTask(){
+  if (currentFolder==='/'){
+    alert('请先进到一个子目录，再选它。')
+    return
+  }
+  // 回填目录。不清空弹窗里其它已填内容，也不动 editingId，所以编辑老任务时同样安全
+  $('f_folder').value = currentFolder
+  $('f_folder_path').value = browseDisplayPath()
+  $('f_folder_tip').textContent = '已选择：' + browseDisplayPath()
+  // 任务名还空着的话，顺手用目录名补上
+  if (!$('f_name').value.trim()){
+    $('f_name').value = browseStack[browseStack.length-1].name || ''
+  }
+  pickingForTask = false
+  // 切回任务管理页，并把弹窗放回来
+  document.querySelectorAll('.page').forEach(x=>{ if(x.id!=='page-tasks') x.classList.remove('active') })
+  document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'))
+  $('page-tasks').classList.add('active')
+  document.querySelector('[data-page=tasks]').classList.add('active')
+  $('taskModal').classList.add('show')
+}
+
+// ============ 启动 ============
+loadConfig().then(()=>{loadTasks(); pollStatus(true)})
+setInterval(()=>{ if(document.querySelector('.page.active').id==='page-tasks') loadTasks() }, 15000)
+</script>
+</body>
+</html>
