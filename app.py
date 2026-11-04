@@ -24,7 +24,7 @@ from yun139.client import (Yun139Client, Yun139Error, CLOUD_TYPES,
                            set_request_deadline, clear_request_deadline,
                            count_reset, count_snapshot, count_add)
 from yun139.strm import (StrmGenerator, DEFAULT_MEDIA_EXT, DEFAULT_COPY_EXT,
-                         sanitize_name, CancelError)
+                         sanitize_name, CancelError, EXT_NEED_SUFFIX)
 from yun139 import cas as cas_mod
 from yun139.cas import CASRestorer, CASError, is_cas_name
 
@@ -1813,32 +1813,6 @@ def _invalidate_link(file_id, use_cas, cfg=None):
         _link_cache.pop(key, None)
 
 
-_MIME_BY_EXT = {
-    ".mp4": "video/mp4", ".m4v": "video/mp4",
-    ".mkv": "video/x-matroska", ".webm": "video/webm",
-    ".ts": "video/mp2t", ".m2ts": "video/mp2t",
-    ".avi": "video/x-msvideo", ".mov": "video/quicktime",
-    ".wmv": "video/x-ms-wmv", ".flv": "video/x-flv",
-    ".rmvb": "application/vnd.rn-realmedia-vbr",
-    ".mpg": "video/mpeg", ".mpeg": "video/mpeg",
-}
-
-
-def _guess_mime(name):
-    """按文件名后缀猜一个 Content-Type；认不出来就返回空串。
-
-    【v1.1】为什么需要它：秒传还原时 contentType 被写死成
-    application/octet-stream（yun139/cas.py:546），直链下载也会带这个值。
-    代理模式以前原样透传，于是播放器拿到的永远是 octet-stream。
-
-    MKV/MP4 靠文件头魔数能自救，ISO 不行 —— 它没有魔数，只能靠后缀。
-    这里至少不要把 ISO 说成 video/mp4（那会让播放器按 MP4 解，必然花屏）。
-    ISO 不在表里，就落到调用方的兜底 application/octet-stream。
-    """
-    ext = os.path.splitext(name or "")[1].lower()
-    return _MIME_BY_EXT.get(ext, "")
-
-
 def _proxy_stream(file_id, cfg, cas_name, use_cas):
     """
     代理转发模式：视频流经本机中转（默认）。
@@ -1898,16 +1872,19 @@ def _proxy_stream(file_id, cfg, cas_name, use_cas):
             return err2
         up = _open(url2, rng)
 
-    # 【v1.1】Content-Type 不再无脑透传。
-    # 上游（秒传还原出来的临时文件）永远是 application/octet-stream，
-    # 透传出去等于告诉播放器"这是一坨未知二进制"。按文件名后缀纠正，
-    # 上游给了明确的 video/* 时才尊重上游。
-    up_ctype = (up.headers.get("Content-Type") or "").strip()
+    # 【v1.1】只有 ISO 类才纠正 Content-Type，其余格式完全沿用旧逻辑。
+    #
+    # 秒传还原时 contentType 写死 application/octet-stream（cas.py:546），
+    # 代理模式原样透传时，ISO 会被说成 octet-stream —— 虽然也不算对，
+    # 但至少比说成 video/mp4 好（后者会让播放器直接按 MP4 解，必花屏）。
+    #
+    # MKV/MP4/TS 有文件头魔数，上游给什么就传什么，绝不插手 ——
+    # 用户的要求是"修 ISO 不能影响别的格式"，那就在这里划死界限。
     hint_name = cas_name[:-4] if cas_name.lower().endswith(".cas") else (cas_name or "")
-    if not up_ctype or up_ctype.startswith("application/octet-stream"):
-        ctype = _guess_mime(hint_name) or "application/octet-stream"
+    if os.path.splitext(hint_name)[1].lower() in EXT_NEED_SUFFIX:
+        ctype = "application/octet-stream"
     else:
-        ctype = up_ctype
+        ctype = up.headers.get("Content-Type") or "video/mp4"
 
     headers = {
         "Accept-Ranges": "bytes",
