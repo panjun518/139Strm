@@ -1920,21 +1920,36 @@ def direct_link(file_id):
     带 ?cas=文件名 时走秒传还原流程。
 
     路径有两种形式，都要兼容：
-        /d/<file_id>                旧版（无扩展名，ISO 会被当普通码流解 → 花屏）
-        /d/<file_id>/<文件名>        新版（URL 末尾带 .iso/.mkv，播放器才认得出）
+        /d/<file_id>                旧版（身份挂在 ?cas= 上）
+        /d/<file_id>/<文件名>        新版（文件名进路径）
 
-    尾部的文件名**只用于给播放器看**，不参与任何查表/拼路径 ——
-    真正的文件身份始终是第一段那个 ID，所以多一段不会影响取链逻辑。
+    尾部的文件名有两种含义：
+        xxx.iso / xxx.mkv  —— 纯提示，只给播放器看，不参与查表
+        xxx.iso.cas        —— v1.2：就是 .cas 文件名，身份写在路径里，
+                              播放器丢掉 query 也能正常还原
     """
-    # 新版 URL 把文件名放在第二段；这里只取第一段做 ID。
-    # 不取第二段做任何事：既不查表也不拼路径，避免路径穿越。
+    # 路径有两种形式，都要兼容：
+    #     /d/<file_id>                     老版（身份挂在 ?cas= 上）
+    #     /d/<file_id>/<文件名>             文件名进路径（v1.1 起给 ISO 用）
+    #
+    # 尾部这一段的两种用法：
+    #   * xxx.iso / xxx.mkv  —— 纯提示，只给播放器看，不参与查表
+    #   * xxx.iso.cas        —— v1.2 起，OpenList 同形：这一段**就是** .cas 名，
+    #                           身份写在路径里，播放器丢了 query 也不影响还原
     if "/" in file_id:
-        file_id = file_id.split("/", 1)[0]
+        head, tail = file_id.split("/", 1)
+        file_id = head
+        path_hint = tail.rsplit("/", 1)[-1]
+    else:
+        path_hint = ""
     cfg = load_config()
     if not cfg.get("authorization"):
         return Response("尚未配置移动云盘 Authorization", status=503)
 
     cas_name = request.args.get("cas") or ""
+    if not cas_name and path_hint and is_cas_name(path_hint):
+        # 路径末段以 .cas 结尾：和 OpenList 一样，直接认作要还原的文件名
+        cas_name = path_hint
     use_cas = (bool(cas_name) and is_cas_name(cas_name)
                and cfg.get("cas_enabled", True))
     # 默认 302 直连：视频流从云盘 CDN 直达播放器，不消耗服务器带宽。
