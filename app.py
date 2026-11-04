@@ -1449,20 +1449,28 @@ def _is_resume(file_id, gap=None, use_cas=False):
     所以补一条：**没有记录、但服务端有这部片子的痕迹、而且这是起播请求**
     → 判为续播。三个条件缺一不可：
 
-      * 没有记录（gap==0）—— 有记录的正常走上面那条；
+      * 没有记录（gap is None）—— 有记录的正常走上面那条；
       * 起播请求 —— **挡住"播放中拖进度条"**（拖动带偏移）；
       * 服务端有痕迹 —— **挡住"真的第一次播"**（真新播服务端没痕迹）。
+
+    【v1.3 —— 修 gap==0 的致命歧义】
+    上面这条兜底原来写的是 `not gap`，结果把**「从未来过」和「1 秒内刚来过」
+    当成了同一件事**。播放器（以及 Emby 代理）在快进/缓冲时一秒内会连发
+    好几个请求，后一个的 gap 被 int() 截成 0 → 每次都命中兜底判成续播
+    → 每次清掉探测节流 → 每次多付一次跨国际线路的 CDN 探测（实测 540ms）。
+    实测一分钟四十多次请求，近一半踩中，累计白等十几秒 —— 就是用户看到的
+    「拉进度条卡半天」。现在用 None 表示"真的没有记录"，0 表示"刚来过"。
 
     误判的代价只是「多花一两秒重新秒传一次」，不影响观看；
     而且"服务端有痕迹"这个条件保证了**不会高频触发**，
     不会重演 v2.1.8 那种还原风暴。
     """
     # 一、有记录：间隔够久就是续播
-    if gap and gap > RESUME_IDLE_GAP:
+    if gap is not None and gap > RESUME_IDLE_GAP:
         _resume_why.reason = "gap"
         return True
     # 二、没记录：有痕迹 + 起播请求 → 也是续播
-    if not gap and _is_playback_start() and _has_server_trace(file_id, use_cas):
+    if gap is None and _is_playback_start() and _has_server_trace(file_id, use_cas):
         app.logger.info(
             "续播判定兜底命中（无记录但有痕迹）file=%s cas=%s",
             file_id[:12], use_cas)
@@ -1839,7 +1847,9 @@ def _proxy_stream(file_id, cfg, cas_name, use_cas):
     _load_last_seen()
     with _last_seen_lock:
         _prev = _last_seen.get(file_id)
-        gap = int(time.time() - _prev) if _prev else 0
+        # None = 真的没有记录；0 = 1 秒内刚来过。两者绝不能混为一谈：
+        # 后者是播放器在连续缓冲，判成续播会白付一次 CDN 探测（实测 540ms）。
+        gap = None if _prev is None else max(int(time.time() - _prev), 0)
         _last_seen[file_id] = time.time()
     _save_last_seen()
     resume = _is_resume(file_id, gap, use_cas)
@@ -1969,7 +1979,9 @@ def direct_link(file_id):
     _load_last_seen()          # 重启后第一次请求时把播放记录读回来
     with _last_seen_lock:
         _prev = _last_seen.get(file_id)
-        gap = int(time.time() - _prev) if _prev else 0
+        # None = 真的没有记录；0 = 1 秒内刚来过。两者绝不能混为一谈：
+        # 后者是播放器在连续缓冲，判成续播会白付一次 CDN 探测（实测 540ms）。
+        gap = None if _prev is None else max(int(time.time() - _prev), 0)
         _last_seen[file_id] = time.time()
         if len(_last_seen) > LAST_SEEN_KEEP:
             # 只留最近的一批，别让表无限长
