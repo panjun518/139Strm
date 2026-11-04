@@ -160,20 +160,33 @@ class StrmGenerator:
         # 提示名一律用去掉 .cas 的那一份：若配置了 strip_cas=False，
         # safe 会是 "xxx.iso.cas"，以 .cas 结尾对播放器毫无提示作用。
         #
-        # 【只给 ISO 类加，其它格式一个字都不动】
+        # 【v1.2 —— 对齐 OpenList 的 URL 形态（实测）】
+        #
+        # 实测 OpenList(139cas) 自己生成的 strm 是这个样子：
+        #   http://host/d/139/.../第18集 4K.iso.cas
+        # 也就是：**整条云盘文件名（含 .cas）作为路径的最后一段，没有 query**。
+        # 这样"这是哪个文件"是写在路径里的，播放器怎么截断 query 都不会丢。
+        #
+        # 我们原来的写法是 `/d/<id>?cas=xxx.iso.cas`：身份挂在 query 上。
+        # 只要播放器/中间层把 query 丢掉（有些播放器重发请求只带 path），
+        # 服务端就认不出这是 .cas，直接去取 .cas 那个 544 字节的壳，
+        # 播放器拿到几百字节的 JSON 当视频解 —— 这就是花屏/黑屏的来源之一。
+        #
+        # 【只给 ISO/IMG 类改，其它格式一个字都不动】
         # 用户的铁律：修 ISO 不能影响别的格式。MKV/MP4/TS 现在明明正常，
         # 它们的 URL 保持原样（/d/<id>?cas=...），不做任何改动 ——
         # 少动一处就少一处风险，没必要为了"统一"去碰能用的东西。
         hint = name[:-4] if name.lower().endswith(".cas") else name
         hint_ext = os.path.splitext(hint)[1].lower()
         if hint_ext in EXT_NEED_SUFFIX:
+            # 和 OpenList 同形：最后一段就是云盘里的完整文件名（含 .cas）
             url = (f"{self.base_url}/d/{item.file_id}/"
-                   f"{quote(sanitize_name(hint), safe='')}")
+                   f"{quote(sanitize_name(raw_name), safe='')}")
         else:
             url = f"{self.base_url}/d/{item.file_id}"
-        if is_cas:
-            # 带上原始文件名，302 时才知道要做秒传还原
-            url += "?cas=" + quote(raw_name, safe="")
+            if is_cas:
+                # 带上原始文件名，302 时才知道要做秒传还原
+                url += "?cas=" + quote(raw_name, safe="")
 
         exists = os.path.exists(strm_path)
         # 增量模式（默认）：同名 strm 已存在且内容一致才跳过。
