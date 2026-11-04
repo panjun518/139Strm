@@ -17,6 +17,11 @@ DEFAULT_MEDIA_EXT = [
 # 常见字幕/附属文件后缀（可选择直接下载到本地）
 DEFAULT_COPY_EXT = ["srt", "ass", "ssa", "sub", "vtt", "nfo", "jpg", "png"]
 
+# 这些格式**没有可探测的文件头魔数**，播放器只能靠 URL 后缀认类型，
+# 所以 strm 里要给它们带上文件名。其余格式（mkv/mp4/ts…）靠魔数就能
+# 自识别，URL 保持原样不动 —— 不碰能用的东西。
+EXT_NEED_SUFFIX = {".iso", ".img"}
+
 ILLEGAL_CHARS = r'[\\/:*?"<>|]'
 
 
@@ -154,8 +159,18 @@ class StrmGenerator:
         # 现在把文件名放进路径：`/d/<id>/xxx.iso`，URL 末尾就是真实后缀。
         # 提示名一律用去掉 .cas 的那一份：若配置了 strip_cas=False，
         # safe 会是 "xxx.iso.cas"，以 .cas 结尾对播放器毫无提示作用。
+        #
+        # 【只给 ISO 类加，其它格式一个字都不动】
+        # 用户的铁律：修 ISO 不能影响别的格式。MKV/MP4/TS 现在明明正常，
+        # 它们的 URL 保持原样（/d/<id>?cas=...），不做任何改动 ——
+        # 少动一处就少一处风险，没必要为了"统一"去碰能用的东西。
         hint = name[:-4] if name.lower().endswith(".cas") else name
-        url = f"{self.base_url}/d/{item.file_id}/{quote(sanitize_name(hint), safe='')}"
+        hint_ext = os.path.splitext(hint)[1].lower()
+        if hint_ext in EXT_NEED_SUFFIX:
+            url = (f"{self.base_url}/d/{item.file_id}/"
+                   f"{quote(sanitize_name(hint), safe='')}")
+        else:
+            url = f"{self.base_url}/d/{item.file_id}"
         if is_cas:
             # 带上原始文件名，302 时才知道要做秒传还原
             url += "?cas=" + quote(raw_name, safe="")
