@@ -1813,6 +1813,32 @@ def _invalidate_link(file_id, use_cas, cfg=None):
         _link_cache.pop(key, None)
 
 
+_MIME_BY_EXT = {
+    ".mp4": "video/mp4", ".m4v": "video/mp4",
+    ".mkv": "video/x-matroska", ".webm": "video/webm",
+    ".ts": "video/mp2t", ".m2ts": "video/mp2t",
+    ".avi": "video/x-msvideo", ".mov": "video/quicktime",
+    ".wmv": "video/x-ms-wmv", ".flv": "video/x-flv",
+    ".rmvb": "application/vnd.rn-realmedia-vbr",
+    ".mpg": "video/mpeg", ".mpeg": "video/mpeg",
+}
+
+
+def _guess_mime(name):
+    """按文件名后缀猜一个 Content-Type；认不出来就返回空串。
+
+    【v1.1】为什么需要它：秒传还原时 contentType 被写死成
+    application/octet-stream（yun139/cas.py:546），直链下载也会带这个值。
+    代理模式以前原样透传，于是播放器拿到的永远是 octet-stream。
+
+    MKV/MP4 靠文件头魔数能自救，ISO 不行 —— 它没有魔数，只能靠后缀。
+    这里至少不要把 ISO 说成 video/mp4（那会让播放器按 MP4 解，必然花屏）。
+    ISO 不在表里，就落到调用方的兜底 application/octet-stream。
+    """
+    ext = os.path.splitext(name or "")[1].lower()
+    return _MIME_BY_EXT.get(ext, "")
+
+
 def _proxy_stream(file_id, cfg, cas_name, use_cas):
     """
     代理转发模式：视频流经本机中转（默认）。
@@ -1872,9 +1898,20 @@ def _proxy_stream(file_id, cfg, cas_name, use_cas):
             return err2
         up = _open(url2, rng)
 
+    # 【v1.1】Content-Type 不再无脑透传。
+    # 上游（秒传还原出来的临时文件）永远是 application/octet-stream，
+    # 透传出去等于告诉播放器"这是一坨未知二进制"。按文件名后缀纠正，
+    # 上游给了明确的 video/* 时才尊重上游。
+    up_ctype = (up.headers.get("Content-Type") or "").strip()
+    hint_name = cas_name[:-4] if cas_name.lower().endswith(".cas") else (cas_name or "")
+    if not up_ctype or up_ctype.startswith("application/octet-stream"):
+        ctype = _guess_mime(hint_name) or "application/octet-stream"
+    else:
+        ctype = up_ctype
+
     headers = {
         "Accept-Ranges": "bytes",
-        "Content-Type": up.headers.get("Content-Type") or "video/mp4",
+        "Content-Type": ctype,
         "Cache-Control": "no-store",
     }
     for h in ("Content-Length", "Content-Range", "ETag", "Last-Modified"):
@@ -1904,7 +1941,18 @@ def direct_link(file_id):
 
     视频流直接从移动云盘 CDN 到播放器，本机只做一次跳转，不中转流量。
     带 ?cas=文件名 时走秒传还原流程。
+
+    路径有两种形式，都要兼容：
+        /d/<file_id>                旧版（无扩展名，ISO 会被当普通码流解 → 花屏）
+        /d/<file_id>/<文件名>        新版（URL 末尾带 .iso/.mkv，播放器才认得出）
+
+    尾部的文件名**只用于给播放器看**，不参与任何查表/拼路径 ——
+    真正的文件身份始终是第一段那个 ID，所以多一段不会影响取链逻辑。
     """
+    # 新版 URL 把文件名放在第二段；这里只取第一段做 ID。
+    # 不取第二段做任何事：既不查表也不拼路径，避免路径穿越。
+    if "/" in file_id:
+        file_id = file_id.split("/", 1)[0]
     cfg = load_config()
     if not cfg.get("authorization"):
         return Response("尚未配置移动云盘 Authorization", status=503)
