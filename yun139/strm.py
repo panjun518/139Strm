@@ -136,19 +136,44 @@ class StrmGenerator:
                 self._produced.add(os.path.abspath(strm_path))
             return
 
-        exists = os.path.exists(strm_path)
-        # 增量模式（默认）：同名 strm 已存在就跳过（源头仍在，记录为已产出）
-        if exists and not self.force:
-            self.skipped += 1
-            self._produced.add(os.path.abspath(strm_path))
-            return
-
-        # 关键：strm 内容指向我们自己的 /d/<file_id>，
-        # 播放时由服务端 302 到移动云盘直链，本机不中转流量
-        url = f"{self.base_url}/d/{item.file_id}"
+        # 【v1.1 —— ISO 花屏的根因就在这里】
+        #
+        # 以前 URL 是 `/d/<纯数字ID>?cas=xxx.iso.cas`：路径段里**一个扩展名都没有**，
+        # 后缀藏在 query 里。
+        #
+        # 对 MKV/MP4 无所谓 —— 它们文件头有魔数（1A45DFA3 / ftyp），播放器
+        # 靠内容就能认出容器。
+        #
+        # 但 ISO 没有魔数：前 32KB 是 2048 字节扇区目录，UDF 签名（BEA01/NSR02）
+        # 在 32768 偏移处，常规探测（只看开头几 KB）扫不到。它认类型的唯一线索
+        # 就是 URL 后缀。而秒传还原时 contentType 又被写死成
+        # application/octet-stream（yun139/cas.py:546），Content-Type 也给不了
+        # 任何提示 —— 两条线索全断，播放器只能按普通码流去解扇区数据，
+        # 于是花屏。
+        #
+        # 现在把文件名放进路径：`/d/<id>/xxx.iso`，URL 末尾就是真实后缀。
+        # 提示名一律用去掉 .cas 的那一份：若配置了 strip_cas=False，
+        # safe 会是 "xxx.iso.cas"，以 .cas 结尾对播放器毫无提示作用。
+        hint = name[:-4] if name.lower().endswith(".cas") else name
+        url = f"{self.base_url}/d/{item.file_id}/{quote(sanitize_name(hint), safe='')}"
         if is_cas:
             # 带上原始文件名，302 时才知道要做秒传还原
             url += "?cas=" + quote(raw_name, safe="")
+
+        exists = os.path.exists(strm_path)
+        # 增量模式（默认）：同名 strm 已存在且内容一致才跳过。
+        # 内容不一致（旧版 URL 没有文件名段）必须重写，否则升级后
+        # 老 strm 还指着没后缀的地址，ISO 照样花屏。
+        if exists and not self.force:
+            try:
+                with open(strm_path, "r", encoding="utf-8") as fp:
+                    old_content = fp.read().strip()
+            except OSError:
+                old_content = None
+            if old_content == url:
+                self.skipped += 1
+                self._produced.add(os.path.abspath(strm_path))
+                return
         try:
             with open(strm_path, "w", encoding="utf-8") as fp:
                 fp.write(url)
